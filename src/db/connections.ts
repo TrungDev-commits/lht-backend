@@ -51,10 +51,12 @@ export function getModel<T>(
   collection?: string
 ): Model<T> {
   const conn = getConnection(workspace);
-  if (conn) {
-    return (conn.models[name] as Model<T> | undefined) ?? conn.model<T>(name, schema as any, collection);
+  if (!conn) {
+    throw new Error(
+      `[L.H.T DB] Workspace "${workspace}" chưa sẵn sàng — MONGODB_URI thiếu hoặc kết nối MongoDB thất bại lúc khởi động.`
+    );
   }
-  return (mongoose.models[name] as Model<T> | undefined) ?? mongoose.model<T>(name, schema as any, collection);
+  return (conn.models[name] as Model<T> | undefined) ?? conn.model<T>(name, schema as any, collection);
 }
 
 export async function connectAll(): Promise<void> {
@@ -63,19 +65,15 @@ export async function connectAll(): Promise<void> {
     return;
   }
 
-  try {
-    base = await mongoose.createConnection(env.MONGODB_URI, CONN_OPTIONS).asPromise();
+  base = await mongoose.createConnection(env.MONGODB_URI, CONN_OPTIONS).asPromise();
 
-    for (const workspace of Object.keys(WORKSPACE_DB) as DbWorkspace[]) {
-      const dbName = WORKSPACE_DB[workspace];
-      const conn = dbName && dbName !== 'lht' ? base.useDb(dbName, { useCache: true }) : base;
-      workspaceConns.set(workspace, conn);
-    }
-
-    console.log('[L.H.T DB] Kết nối MongoDB thành công (news/kb/chat/memory trên cùng pool).');
-  } catch (err) {
-    console.error('[L.H.T DB] Kết nối MongoDB thất bại:', err instanceof Error ? err.message : err);
+  for (const workspace of Object.keys(WORKSPACE_DB) as DbWorkspace[]) {
+    const dbName = WORKSPACE_DB[workspace];
+    const conn = dbName && dbName !== 'lht' ? base.useDb(dbName, { useCache: true }) : base;
+    workspaceConns.set(workspace, conn);
   }
+
+  console.log('[L.H.T DB] Kết nối MongoDB thành công (news/kb/chat/memory trên cùng pool).');
 }
 
 export async function disconnectAll(): Promise<void> {
