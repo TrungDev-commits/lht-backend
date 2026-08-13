@@ -23,6 +23,12 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # [ANTI-QUOTA] Nhiều key cách nhau dấu phẩy: KEY2,KEY3
+      - key: GEMINI_API_KEYS
+        sync: false
+      # [ANTI-QUOTA] Model free dự phòng khi hết quota (mặc định: gemini-2.5-flash-lite,...)
+      - key: GEMINI_FREE_MODELS
+        sync: false
       - key: NEWS_RSS_URL
         sync: false
       - key: FINANCE_DB_URI

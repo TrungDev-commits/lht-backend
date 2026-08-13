@@ -16,9 +16,16 @@ pipelineRouter.post('/run', async (req, res) => {
   }
 
   const body = req.body ?? {};
-  const result = await knowledgePipeline.run({
-    rssUrl: typeof body.rssUrl === 'string' && body.rssUrl.trim() ? body.rssUrl.trim() : undefined,
-    limitPerSource: typeof body.limit === 'number' ? body.limit : undefined,
-  });
-  res.json({ success: true, result });
+  try {
+    const result = await knowledgePipeline.run({
+      rssUrl: typeof body.rssUrl === 'string' && body.rssUrl.trim() ? body.rssUrl.trim() : undefined,
+      limitPerSource: typeof body.limit === 'number' ? body.limit : undefined,
+    });
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Pipeline gặp lỗi không xác định.',
+    });
+  }
 });

@@ -22,9 +22,17 @@ export const env = {
   MONGODB_URI: process.env.MONGODB_URI ?? '',
   FINANCE_DB_URI: process.env.FINANCE_DB_URI ?? '',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? '',
-  GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash',
+  // Nhiều API key cách nhau dấu phẩy — rotate khi quota key trước hết
+  GEMINI_API_KEYS: process.env.GEMINI_API_KEYS ?? '',
+  GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite',
   GEMINI_API_VERSION: process.env.GEMINI_API_VERSION ?? 'v1',
   GEMINI_EMBED_MODEL: process.env.GEMINI_EMBED_MODEL ?? 'gemini-embedding-2',
+  GEMINI_FALLBACK_MODEL: process.env.GEMINI_FALLBACK_MODEL ?? '',
+  // Danh sách model free để rotate khi quota hết, cách nhau dấu phẩy
+  // Thứ tự ưu tiên: primary -> mỗi model trong list này
+  GEMINI_FREE_MODELS: process.env.GEMINI_FREE_MODELS ?? 'gemini-2.5-flash-lite,gemini-2.0-flash-lite,gemini-2.0-flash,gemini-1.5-flash-8b',
+  PIPELINE_LIMIT_PER_SOURCE: toNumber(process.env.PIPELINE_LIMIT_PER_SOURCE, 5),
+  PIPELINE_AI_DELAY_MS: toNumber(process.env.PIPELINE_AI_DELAY_MS, 1000),
   NEWS_RSS_URL: process.env.NEWS_RSS_URL ?? '',
   MQTT_URL: process.env.MQTT_URL ?? '',
   FRONTEND_DIST: process.env.FRONTEND_DIST ?? '',
@@ -44,3 +52,27 @@ export const env = {
 export const GEMINI_MODEL = env.GEMINI_MODEL;
 export const GEMINI_API_VERSION = env.GEMINI_API_VERSION;
 export const GEMINI_EMBED_MODEL = env.GEMINI_EMBED_MODEL;
+export const GEMINI_FALLBACK_MODEL = env.GEMINI_FALLBACK_MODEL;
+
+/** Trả về danh sách tất cả Gemini API keys (primary + extras) theo thứ tự ưu tiên */
+export function getAllGeminiKeys(): string[] {
+  const primary = env.GEMINI_API_KEY.trim();
+  const extras = env.GEMINI_API_KEYS
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  return [primary, ...extras].filter((k) => {
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/** Trả về danh sách model free để rotate khi quota hết */
+export function getFreeModelList(): string[] {
+  return env.GEMINI_FREE_MODELS
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+}

@@ -1,7 +1,36 @@
 import { GoogleGenAI } from '@google/genai';
-import { env, GEMINI_MODEL, GEMINI_API_VERSION, GEMINI_EMBED_MODEL } from '../config/env.js';
+import {
+  env,
+  GEMINI_MODEL,
+  GEMINI_API_VERSION,
+  GEMINI_EMBED_MODEL,
+  getAllGeminiKeys,
+  getFreeModelList,
+} from '../config/env.js';
 import { runGarbageCollection } from './scraper.js';
 import { getTodayFinanceSummary, type FinanceExpenseLimit } from '../config/finance.js';
+
+const MAX_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 800;
+const MAX_BACKOFF_MS = 10_000;
+
+export function isQuotaExhausted(err: unknown): boolean {
+  if (!err) return false;
+  const candidate =
+    (err as { status?: number | string }).status ??
+    (err as { code?: number | string }).code ??
+    (err as { statusCode?: number | string }).statusCode ??
+    (err as { response?: { status?: number | string } }).response?.status;
+  if (candidate === 429 || candidate === 503) return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /(quota|RESOURCE_EXHAUSTED|rate\s*limit|too\s*many\s*requests|service\s*unavailable)/i.test(message);
+}
+
+function sleepWithJitter(baseMs: number, attempt: number): Promise<void> {
+  const exponential = Math.min(baseMs * 2 ** (attempt - 1), MAX_BACKOFF_MS);
+  const jittered = exponential * (0.5 + Math.random() * 0.5);
+  return new Promise((resolve) => setTimeout(resolve, jittered));
+}
 
 export interface GraphNode {
   id: string;
@@ -286,16 +315,99 @@ PHONG CÁCH VÀ QUY TẮC:
 5. Kết thúc bằng trạng thái hệ thống ngắn (VD: [L.H.T - TÍN HIỆU 100%]).`;
 
 class GeminiService {
-  private readonly ai: GoogleGenAI | null;
+  /**
+   * Pool các GoogleGenAI client, mỗi phần tử ứng với 1 API key.
+   * Khi 1 key bị 429, hệ thống tự động thử key tiếp theo trong pool.
+   */
+  private readonly clients: GoogleGenAI[];
 
   constructor() {
-    this.ai = env.GEMINI_API_KEY
-      ? new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, httpOptions: { apiVersion: GEMINI_API_VERSION } })
-      : null;
+    const keys = getAllGeminiKeys();
+    this.clients = keys.map(
+      (key) => new GoogleGenAI({ apiKey: key, httpOptions: { apiVersion: GEMINI_API_VERSION } })
+    );
+    if (this.clients.length === 0) {
+      console.warn('[L.H.T GEMINI] Không có API key nào — chạy ở chế độ dự phòng.');
+    } else {
+      console.log(`[L.H.T GEMINI] Pool khởi tạo: ${this.clients.length} key(s).`);
+    }
   }
 
   isAvailable(): boolean {
-    return this.ai !== null;
+    return this.clients.length > 0;
+  }
+
+  /**
+   * Core Gemini call với chiến lược rotation đầy đủ:
+   *   Với mỗi model trong [primary, ...freeModels]:
+   *     Với mỗi key trong pool:
+   *       Thử MAX_ATTEMPTS lần với exponential backoff
+   *       Nếu gặp quota/rate-limit → thử key tiếp
+   *     Nếu tất cả key đều hết quota → thử model tiếp
+   *   Ném lỗi cuối cùng nếu mọi combination đều thất bại.
+   */
+  private async generateContentWithRetry(request: any): Promise<any> {
+    if (this.clients.length === 0) {
+      throw new Error('GEMINI_API_KEY chưa được cấu hình.');
+    }
+
+    // Tạo danh sách model: primary trước, sau đó các free model (dedup)
+    const freeModels = getFreeModelList();
+    const primaryModel: string = request.model ?? GEMINI_MODEL;
+    const seen = new Set<string>([primaryModel]);
+    const models: string[] = [primaryModel];
+    for (const m of freeModels) {
+      if (!seen.has(m)) {
+        seen.add(m);
+        models.push(m);
+      }
+    }
+
+    let lastError: unknown;
+
+    for (const model of models) {
+      let modelExhausted = true; // assume exhausted until a non-quota error
+
+      for (let ki = 0; ki < this.clients.length; ki++) {
+        const client = this.clients[ki]!;
+        let keyExhausted = true;
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          try {
+            const result = await client.models.generateContent({ ...request, model });
+            return result;
+          } catch (err) {
+            lastError = err;
+            if (!isQuotaExhausted(err)) {
+              // Lỗi không phải quota (mạng, schema...) → ném ngay, không rotate
+              throw err;
+            }
+            keyExhausted = true;
+            if (attempt < MAX_ATTEMPTS) {
+              await sleepWithJitter(BASE_BACKOFF_MS, attempt);
+            }
+          }
+        }
+
+        if (keyExhausted && ki < this.clients.length - 1) {
+          console.warn(
+            `[L.H.T GEMINI] Key #${ki + 1} hết quota với model "${model}" → thử key #${ki + 2}.`
+          );
+        }
+      }
+
+      if (modelExhausted) {
+        // Mọi key đều hết quota cho model này → thử model tiếp theo
+        const nextModel = models[models.indexOf(model) + 1];
+        if (nextModel) {
+          console.warn(
+            `[L.H.T GEMINI] Tất cả key đã hết quota với model "${model}" → chuyển sang "${nextModel}".`
+          );
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   private async generateJson<T>(input: {
@@ -305,11 +417,7 @@ class GeminiService {
     schema: unknown;
     temperature?: number;
   }): Promise<T> {
-    if (!this.ai) {
-      throw new Error('GEMINI_API_KEY chưa được cấu hình.');
-    }
-
-    const response = await this.ai.models.generateContent({
+    const response = await this.generateContentWithRetry({
       model: input.model ?? GEMINI_MODEL,
       contents: input.userContent,
       config: {
@@ -341,14 +449,26 @@ class GeminiService {
   }
 
   async embed(text: string): Promise<number[]> {
-    if (!this.ai) return [];
+    if (!this.isAvailable()) return [];
     try {
-      const response = await this.ai.models.embedContent({
-        model: GEMINI_EMBED_MODEL,
-        contents: [{ role: 'user', parts: [{ text: text.slice(0, 4_000) }] }],
-      });
-      const values = response.embeddings?.[0]?.values;
-      return values ? Array.from(values) : [];
+      // Embed dùng key đầu tiên (primary); nếu fail thử key tiếp
+      for (let ki = 0; ki < this.clients.length; ki++) {
+        const client = this.clients[ki]!;
+        try {
+          const response = await client.models.embedContent({
+            model: GEMINI_EMBED_MODEL,
+            contents: [{ role: 'user', parts: [{ text: text.slice(0, 4_000) }] }],
+          });
+          const values = response.embeddings?.[0]?.values;
+          return values ? Array.from(values) : [];
+        } catch (err) {
+          if (!isQuotaExhausted(err) || ki === this.clients.length - 1) {
+            throw err;
+          }
+          console.warn(`[L.H.T GEMINI] Embed key #${ki + 1} hết quota → thử key #${ki + 2}.`);
+        }
+      }
+      return [];
     } catch (err) {
       console.warn('[L.H.T GEMINI] Embedding lỗi:', err instanceof Error ? err.message : err);
       return [];
@@ -373,10 +493,10 @@ class GeminiService {
   }
 
   async generateIceBreaker(keyword: string): Promise<string> {
-    if (!this.ai) return '';
+    if (!this.isAvailable()) return '';
 
     try {
-      const response = await this.ai.models.generateContent({
+      const response = await this.generateContentWithRetry({
         model: GEMINI_MODEL,
         contents: `Dựa trên tin tức công nghệ hôm nay về: "${keyword}". Hãy tạo 1 câu "ice-breaker" tiếng Việt tự nhiên, ngầu, hợp để mở đầu buổi nói chuyện với anh em team R&D. Chỉ trả về 1 câu duy nhất, tối đa 30 từ.`,
         config: { systemInstruction: 'Bạn là L.H.T. Trả lời bằng tiếng Việt.', temperature: 0.8 },
@@ -403,7 +523,7 @@ class GeminiService {
     const finance = await getTodayFinanceSummary();
     const financeContext = this.formatFinanceContext(finance);
 
-    if (!this.ai) {
+    if (!this.isAvailable()) {
       return [
         '[L.H.T BẢN TIN SÁNG]',
         'Hệ thống đang ở chế độ dự phòng nội bộ.',
@@ -413,7 +533,7 @@ class GeminiService {
     }
 
     try {
-      const response = await this.ai.models.generateContent({
+      const response = await this.generateContentWithRetry({
         model: GEMINI_MODEL,
         contents: `Tin tức công nghệ hôm nay:\n${newsContext}\n\n${financeContext}\n\nHãy chào Lâm Huệ Trung bằng giọng điệu L.H.T (ngầu, sci-fi), tóm tắt 1-2 tin nổi bật và nhắc nhở ngắn gọn tình hình tài chính hôm nay. Tiếng Việt, tối đa 5 câu.`,
         config: {
@@ -430,10 +550,10 @@ class GeminiService {
   }
 
   async debateQuestion(context: string): Promise<string> {
-    if (!this.ai) {
+    if (!this.isAvailable()) {
       throw new Error('GEMINI_API_KEY chưa được cấu hình.');
     }
-    const response = await this.ai.models.generateContent({
+    const response = await this.generateContentWithRetry({
       model: GEMINI_MODEL,
       contents: `Ngữ cảnh tin tức vừa học:\n${context}`,
       config: {
@@ -494,12 +614,12 @@ class GeminiService {
   }
 
   async chatWithContext(userPrompt: string, context: string): Promise<string> {
-    if (!this.ai) {
+    if (!this.isAvailable()) {
       return `[L.H.T HEURISTIC]: Nhận tín hiệu lệnh: "${userPrompt.trim()}". Hệ thống đang ở chế độ dự phòng nội bộ (thiếu GEMINI_API_KEY).`;
     }
 
     try {
-      const response = await this.ai.models.generateContent({
+      const response = await this.generateContentWithRetry({
         model: GEMINI_MODEL,
         contents: userPrompt,
         config: {
