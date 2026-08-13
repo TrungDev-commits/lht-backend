@@ -24,13 +24,13 @@ export const env = {
   GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? '',
   // Nhiều API key cách nhau dấu phẩy — rotate khi quota key trước hết
   GEMINI_API_KEYS: process.env.GEMINI_API_KEYS ?? '',
-  GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite',
+  GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
   GEMINI_API_VERSION: process.env.GEMINI_API_VERSION ?? 'v1',
   GEMINI_EMBED_MODEL: process.env.GEMINI_EMBED_MODEL ?? 'gemini-embedding-2',
   GEMINI_FALLBACK_MODEL: process.env.GEMINI_FALLBACK_MODEL ?? '',
   // Danh sách model free để rotate khi quota hết, cách nhau dấu phẩy
   // Thứ tự ưu tiên: primary -> mỗi model trong list này
-  GEMINI_FREE_MODELS: process.env.GEMINI_FREE_MODELS ?? 'gemini-2.5-flash-lite,gemini-2.0-flash-lite,gemini-2.0-flash,gemini-1.5-flash-8b',
+  GEMINI_FREE_MODELS: process.env.GEMINI_FREE_MODELS ?? 'gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite,gemini-1.5-flash',
   PIPELINE_LIMIT_PER_SOURCE: toNumber(process.env.PIPELINE_LIMIT_PER_SOURCE, 5),
   PIPELINE_AI_DELAY_MS: toNumber(process.env.PIPELINE_AI_DELAY_MS, 1000),
   NEWS_RSS_URL: process.env.NEWS_RSS_URL ?? '',

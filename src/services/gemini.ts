@@ -26,6 +26,19 @@ export function isQuotaExhausted(err: unknown): boolean {
   return /(quota|RESOURCE_EXHAUSTED|rate\s*limit|too\s*many\s*requests|service\s*unavailable)/i.test(message);
 }
 
+/** 404 NOT_FOUND = model bị deprecated / chưa được cấp quyền — rotate model, không retry key */
+function isModelUnavailable(err: unknown): boolean {
+  if (!err) return false;
+  const candidate =
+    (err as { status?: number | string }).status ??
+    (err as { code?: number | string }).code ??
+    (err as { statusCode?: number | string }).statusCode ??
+    (err as { response?: { status?: number | string } }).response?.status;
+  if (candidate === 404) return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /(NOT_FOUND|no longer available|not available to new users)/i.test(message);
+}
+
 function sleepWithJitter(baseMs: number, attempt: number): Promise<void> {
   const exponential = Math.min(baseMs * 2 ** (attempt - 1), MAX_BACKOFF_MS);
   const jittered = exponential * (0.5 + Math.random() * 0.5);
@@ -367,6 +380,7 @@ class GeminiService {
 
     for (const model of models) {
       let modelExhausted = true; // assume exhausted until a non-quota error
+      let modelUnavailable = false;
 
       for (let ki = 0; ki < this.clients.length; ki++) {
         const client = this.clients[ki]!;
@@ -378,8 +392,16 @@ class GeminiService {
             return result;
           } catch (err) {
             lastError = err;
+            if (isModelUnavailable(err)) {
+              // Model 404/deprecated → không cần thử key khác, chuyển ngay sang model tiếp
+              modelUnavailable = true;
+              console.warn(
+                `[L.H.T GEMINI] Model "${model}" không khả dụng (404) → chuyển sang model tiếp theo.`
+              );
+              break;
+            }
             if (!isQuotaExhausted(err)) {
-              // Lỗi không phải quota (mạng, schema...) → ném ngay, không rotate
+              // Lỗi thực sự (mạng, schema sai...) → ném ngay, không rotate
               throw err;
             }
             keyExhausted = true;
@@ -389,6 +411,8 @@ class GeminiService {
           }
         }
 
+        if (modelUnavailable) break; // thoát vòng key, thử model tiếp
+
         if (keyExhausted && ki < this.clients.length - 1) {
           console.warn(
             `[L.H.T GEMINI] Key #${ki + 1} hết quota với model "${model}" → thử key #${ki + 2}.`
@@ -396,7 +420,7 @@ class GeminiService {
         }
       }
 
-      if (modelExhausted) {
+      if (!modelUnavailable && modelExhausted) {
         // Mọi key đều hết quota cho model này → thử model tiếp theo
         const nextModel = models[models.indexOf(model) + 1];
         if (nextModel) {
