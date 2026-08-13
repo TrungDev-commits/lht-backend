@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: lht-backend
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: node --expose-gc --max-old-space-size=384 dist/index.js
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEWS_DB
+        value: lht-news
+      - key: KNOWLEDGE_DB
+        value: lht-kb
+      - key: CHAT_DB
+        value: lht-chat
+      - key: MEMORY_DB
+        value: lht-memory
+      # Các biến sau nhập thủ công trên Dashboard Render (sync: false):
+      - key: MONGODB_URI
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NEWS_RSS_URL
+        sync: false
+      - key: FINANCE_DB_URI
+        sync: false
+      - key: MQTT_URL
+        sync: false
+      - key: PIPELINE_SECRET
+        sync: false
