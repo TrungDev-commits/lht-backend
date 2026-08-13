@@ -22,8 +22,9 @@ export const env = {
   MONGODB_URI: process.env.MONGODB_URI ?? '',
   FINANCE_DB_URI: process.env.FINANCE_DB_URI ?? '',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? '',
-  GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
-  GEMINI_EMBED_MODEL: process.env.GEMINI_EMBED_MODEL ?? 'text-embedding-004',
+  GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash',
+  GEMINI_API_VERSION: process.env.GEMINI_API_VERSION ?? 'v1',
+  GEMINI_EMBED_MODEL: process.env.GEMINI_EMBED_MODEL ?? 'gemini-embedding-2',
   NEWS_RSS_URL: process.env.NEWS_RSS_URL ?? '',
   MQTT_URL: process.env.MQTT_URL ?? '',
   FRONTEND_DIST: process.env.FRONTEND_DIST ?? '',
@@ -41,4 +42,5 @@ export const env = {
 } as const;
 
 export const GEMINI_MODEL = env.GEMINI_MODEL;
+export const GEMINI_API_VERSION = env.GEMINI_API_VERSION;
 export const GEMINI_EMBED_MODEL = env.GEMINI_EMBED_MODEL;

@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import { env, GEMINI_MODEL, GEMINI_EMBED_MODEL } from '../config/env.js';
+import { env, GEMINI_MODEL, GEMINI_API_VERSION, GEMINI_EMBED_MODEL } from '../config/env.js';
 import { runGarbageCollection } from './scraper.js';
 import { getTodayFinanceSummary, type FinanceExpenseLimit } from '../config/finance.js';
 
@@ -289,7 +289,9 @@ class GeminiService {
   private readonly ai: GoogleGenAI | null;
 
   constructor() {
-    this.ai = env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: env.GEMINI_API_KEY }) : null;
+    this.ai = env.GEMINI_API_KEY
+      ? new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, httpOptions: { apiVersion: GEMINI_API_VERSION } })
+      : null;
   }
 
   isAvailable(): boolean {
