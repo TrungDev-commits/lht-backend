@@ -16,6 +16,19 @@ function toNumber(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** Làm sạch bí mật: bỏ khoảng trắng thừa và cặp nháy ngoài (dễ dán nhầm từ dashboard/.env) */
+export function normalizeSecret(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  let out = value.trim();
+  if (
+    (out.startsWith('"') && out.endsWith('"')) ||
+    (out.startsWith("'") && out.endsWith("'"))
+  ) {
+    out = out.slice(1, -1).trim();
+  }
+  return out;
+}
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV ?? 'development',
   PORT: toNumber(process.env.PORT, 3001),
@@ -45,8 +58,8 @@ export const env = {
   TTS_CACHE_DIR: process.env.TTS_CACHE_DIR ?? '',
   LHT_GH_TOKEN: process.env.LHT_GH_TOKEN ?? '',
   LHT_GH_REPO: process.env.LHT_GH_REPO ?? 'TrungDev-commits/lht-backend',
-  RESEARCH_SECRET: process.env.RESEARCH_SECRET ?? '',
-  PIPELINE_SECRET: process.env.PIPELINE_SECRET ?? '',
+  RESEARCH_SECRET: normalizeSecret(process.env.RESEARCH_SECRET) ?? '',
+  PIPELINE_SECRET: normalizeSecret(process.env.PIPELINE_SECRET) ?? '',
 } as const;
 
 export const GEMINI_MODEL = env.GEMINI_MODEL;

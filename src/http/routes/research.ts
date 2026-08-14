@@ -6,7 +6,7 @@ import {
   failResearchJob,
   hasRecentResearchJob,
 } from '../../services/research.js';
-import { env } from '../../config/env.js';
+import { env, normalizeSecret } from '../../config/env.js';
 
 export const researchRouter = Router();
 
@@ -40,7 +40,7 @@ researchRouter.get('/jobs/:id', async (req, res) => {
 
 // POST /api/research/jobs/:id/complete — GH Action gọi về khi xong
 researchRouter.post('/jobs/:id/complete', async (req, res) => {
-  const secret = req.headers['x-lht-research-secret'] as string | undefined;
+  const secret = normalizeSecret(req.headers['x-lht-research-secret'] as string | undefined);
   if (env.RESEARCH_SECRET && secret !== env.RESEARCH_SECRET) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
@@ -58,7 +58,7 @@ researchRouter.post('/jobs/:id/complete', async (req, res) => {
 
 // POST /api/research/jobs/:id/fail
 researchRouter.post('/jobs/:id/fail', async (req, res) => {
-  const secret = req.headers['x-lht-research-secret'] as string | undefined;
+  const secret = normalizeSecret(req.headers['x-lht-research-secret'] as string | undefined);
   if (env.RESEARCH_SECRET && secret !== env.RESEARCH_SECRET) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
