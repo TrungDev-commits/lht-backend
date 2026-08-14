@@ -14,6 +14,8 @@ export interface Knowledge {
   embedding: number[];
   source_refs: { url: string; source_name: string; published_at?: Date }[];
   quality_score: number;
+  /** true = bản tạm (degraded) khi AI hết quota, chờ pipeline nâng cấp lại */
+  needs_ai_upgrade?: boolean;
   last_reviewed?: Date;
   created_at: Date;
 }
@@ -48,6 +50,7 @@ export const knowledgeSchema = new Schema(
       _id: false,
     },
     quality_score: { type: Number, default: 0.5, min: 0, max: 1 },
+    needs_ai_upgrade: { type: Boolean, default: false },
     last_reviewed: { type: Date },
     created_at: { type: Date, default: Date.now },
   } as Record<string, unknown>,

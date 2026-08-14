@@ -10,9 +10,8 @@ import {
 import { runGarbageCollection } from './scraper.js';
 import { getTodayFinanceSummary, type FinanceExpenseLimit } from '../config/finance.js';
 
-const MAX_ATTEMPTS = 3;
-const BASE_BACKOFF_MS = 800;
-const MAX_BACKOFF_MS = 10_000;
+/** Thời gian key nghỉ (cooldown) khi dính giới hạn RPM/TPM (cửa sổ trượt ~60s). */
+export const RPM_COOLDOWN_MS = 60_000;
 
 export function isQuotaExhausted(err: unknown): boolean {
   if (!err) return false;
@@ -39,10 +38,79 @@ function isModelUnavailable(err: unknown): boolean {
   return /(NOT_FOUND|no longer available|not available to new users)/i.test(message);
 }
 
-function sleepWithJitter(baseMs: number, attempt: number): Promise<void> {
-  const exponential = Math.min(baseMs * 2 ** (attempt - 1), MAX_BACKOFF_MS);
-  const jittered = exponential * (0.5 + Math.random() * 0.5);
-  return new Promise((resolve) => setTimeout(resolve, jittered));
+/** Giới hạn hàng ngày (RPD) — chỉ hồi sau nửa đêm giờ Thái Bình Dương, không phải sau 60s. */
+export function isDailyQuotaExhausted(err: unknown): boolean {
+  if (!err) return false;
+  const candidate = err as { message?: unknown };
+  const message = typeof candidate.message === 'string' ? candidate.message : String(err);
+  return /(per day|daily quota|requests per day|per month|monthly)/i.test(message);
+}
+
+function pacificTimeParts(date: Date): { hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  return { hour, minute };
+}
+
+/** Mốc Unix (ms) của nửa đêm tiếp theo theo giờ Thái Bình Dương (lúc quota RPD reset). */
+export function nextPacificMidnight(from: Date = new Date()): number {
+  const now = from.getTime();
+  const startOfTodayUtc = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+  const dayMs = 86_400_000;
+  for (let day = 0; day <= 3; day++) {
+    for (let hour = 0; hour <= 12; hour++) {
+      const candidate = startOfTodayUtc + day * dayMs + hour * 3_600_000;
+      if (candidate <= now) continue;
+      const { hour: h, minute } = pacificTimeParts(new Date(candidate));
+      if (h === 0 && minute === 0) return candidate;
+    }
+  }
+  return startOfTodayUtc + 2 * dayMs;
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Token bucket giới hạn RPM toàn app — làm mượt tần suất gọi để không vượt limit free tier. */
+export class TokenBucket {
+  private tokens: number;
+  private lastRefill: number;
+
+  constructor(
+    private readonly rpm: number,
+    private readonly now: () => number = Date.now,
+    private readonly sleep: (ms: number) => Promise<void> = defaultSleep
+  ) {
+    this.tokens = Math.max(1, rpm);
+    this.lastRefill = now();
+  }
+
+  private refill(at: number): void {
+    const elapsed = Math.max(0, at - this.lastRefill);
+    this.tokens = Math.min(this.rpm, this.tokens + (elapsed * this.rpm) / 60_000);
+    this.lastRefill = at;
+  }
+
+  async acquire(): Promise<void> {
+    for (;;) {
+      const at = this.now();
+      this.refill(at);
+      if (this.tokens >= 1) {
+        this.tokens -= 1;
+        return;
+      }
+      const needed = 1 - this.tokens;
+      const waitMs = Math.max(25, Math.ceil((needed * 60_000) / this.rpm));
+      await this.sleep(waitMs);
+    }
+  }
 }
 
 export interface GraphNode {
@@ -68,6 +136,11 @@ export interface CognitiveNewsOutput {
   audio_script: string;
   web_dev_analogy: string;
   graph_data: GraphData;
+}
+
+/** Kết quả sơ chế 1 tin: CognitiveNewsOutput + icebreaker (gộp 1 call thay vì 2). */
+export interface ArticleCognitiveOutput extends CognitiveNewsOutput {
+  icebreaker: string;
 }
 
 export interface DigestOutput {
@@ -111,6 +184,7 @@ const NEWS_SCHEMA = {
     keyword: { type: 'STRING' },
     audio_script: { type: 'STRING' },
     web_dev_analogy: { type: 'STRING' },
+    icebreaker: { type: 'STRING' },
     graph_data: {
       type: 'OBJECT',
       properties: {
@@ -143,7 +217,7 @@ const NEWS_SCHEMA = {
       required: ['nodes', 'edges'],
     },
   },
-  required: ['keyword', 'audio_script', 'web_dev_analogy', 'graph_data'],
+  required: ['keyword', 'audio_script', 'web_dev_analogy', 'icebreaker', 'graph_data'],
 } as const;
 
 const DIGEST_SCHEMA = {
@@ -273,7 +347,8 @@ Rules:
 1. audio_script: 2-3 câu tiếng Việt ngắn gọn, tự nhiên như giọng trợ lý AI (không quá 80 từ).
 2. keyword: tiêu đề ngắn gọn VIẾT HOA (tối đa 6 từ).
 3. web_dev_analogy: ẩn dụ sắc bén so sánh khái niệm phần cứng với Web Backend/Node.js.
-4. graph_data: tạo 4-6 node (HARDWARE/SOFTWARE) và các cạnh nối biểu diễn mối quan hệ.`;
+4. icebreaker: 1 câu "chém gió" tiếng Việt ngắn (dưới 25 từ) để mở đầu họp R&D.
+5. graph_data: tạo 4-6 node (HARDWARE/SOFTWARE) và các cạnh nối biểu diễn mối quan hệ.`;
 
 const DIGEST_SYSTEM_PROMPT = `Bạn là L.H.T, trợ lý AI của Lâm Huệ Trung (Senior Full-Stack Web Developer).
 Sơ chế bài báo công nghệ thành thẻ kiến thức tiếng Việt:
@@ -327,18 +402,36 @@ PHONG CÁCH VÀ QUY TẮC:
 4. Dựa vào ngữ cảnh "KIẾN THỨC L.H.T" được cung cấp để trả lời chính xác, trích nguồn khi cần. Nếu kiến thức không đủ, nói rõ và đề nghị "Nghiên cứu thêm".
 5. Kết thúc bằng trạng thái hệ thống ngắn (VD: [L.H.T - TÍN HIỆU 100%]).`;
 
-class GeminiService {
+export interface GeminiServiceOptions {
+  /** Thay thế pool client (dùng cho test). Mặc định: build từ GEMINI_API_KEYS. */
+  clients?: GoogleGenAI[];
+  /** Đồng hồ ảo (dùng cho test cooldown). Mặc định: Date.now. */
+  now?: () => number;
+  /** RPM cho token bucket. Mặc định: env.GEMINI_RPM. */
+  rpm?: number;
+}
+
+export class GeminiService {
   /**
    * Pool các GoogleGenAI client, mỗi phần tử ứng với 1 API key.
    * Khi 1 key bị 429, hệ thống tự động thử key tiếp theo trong pool.
    */
   private readonly clients: GoogleGenAI[];
+  private readonly now: () => number;
+  private readonly bucket: TokenBucket;
+  /** Mỗi key có mốc thời gian (ms) được phép dùng lại; 0 = sẵn sàng. */
+  private readonly keyCooldownUntil: number[];
 
-  constructor() {
-    const keys = getAllGeminiKeys();
-    this.clients = keys.map(
-      (key) => new GoogleGenAI({ apiKey: key, httpOptions: { apiVersion: GEMINI_API_VERSION } })
-    );
+  constructor(options: GeminiServiceOptions = {}) {
+    this.now = options.now ?? Date.now;
+    const keys = options.clients ? [] : getAllGeminiKeys();
+    this.clients =
+      options.clients ??
+      keys.map(
+        (key) => new GoogleGenAI({ apiKey: key, httpOptions: { apiVersion: GEMINI_API_VERSION } })
+      );
+    this.keyCooldownUntil = this.clients.map(() => 0);
+    this.bucket = new TokenBucket(options.rpm ?? env.GEMINI_RPM, this.now);
     if (this.clients.length === 0) {
       console.warn('[L.H.T GEMINI] Không có API key nào — chạy ở chế độ dự phòng.');
     } else {
@@ -350,87 +443,97 @@ class GeminiService {
     return this.clients.length > 0;
   }
 
+  private buildModelList(requestModel: string | undefined): string[] {
+    const freeModels = getFreeModelList();
+    const primary = requestModel || GEMINI_MODEL;
+    const seen = new Set<string>([primary]);
+    const models = [primary];
+    for (const model of freeModels) {
+      if (!seen.has(model)) {
+        seen.add(model);
+        models.push(model);
+      }
+    }
+    return models;
+  }
+
+  /** Số ms còn lại key phải nghỉ (cooldown). 0 = key sẵn sàng dùng lại. */
+  keyCooldownRemainingMs(keyIndex: number): number {
+    return Math.max(0, this.keyCooldownUntil[keyIndex]! - this.now());
+  }
+
+  private coolDownKey(keyIndex: number, err: unknown): void {
+    const now = this.now();
+    this.keyCooldownUntil[keyIndex] = isDailyQuotaExhausted(err)
+      ? nextPacificMidnight(new Date(now))
+      : now + RPM_COOLDOWN_MS;
+  }
+
   /**
-   * Core Gemini call với chiến lược rotation đầy đủ:
-   *   Với mỗi model trong [primary, ...freeModels]:
-   *     Với mỗi key trong pool:
-   *       Thử MAX_ATTEMPTS lần với exponential backoff
-   *       Nếu gặp quota/rate-limit → thử key tiếp
-   *     Nếu tất cả key đều hết quota → thử model tiếp
-   *   Ném lỗi cuối cùng nếu mọi combination đều thất bại.
+   * Core Gemini call với chiến lược rotation:
+   *   - Token bucket làm mượt RPM toàn app.
+   *   - Key dính 429 → cooldown (60s cho RPM/TPM, hết ngày cho RPD), chuyển key tiếp.
+   *   - Model 404 → rotate sang model free tiếp theo.
+   *   - Lỗi thật (mạng/schema) → ném ngay, không rotate.
    */
   private async generateContentWithRetry(request: any): Promise<any> {
+    await this.bucket.acquire();
+
     if (this.clients.length === 0) {
       throw new Error('GEMINI_API_KEY chưa được cấu hình.');
     }
 
-    // Tạo danh sách model: primary trước, sau đó các free model (dedup)
-    const freeModels = getFreeModelList();
-    const primaryModel: string = request.model ?? GEMINI_MODEL;
-    const seen = new Set<string>([primaryModel]);
-    const models: string[] = [primaryModel];
-    for (const m of freeModels) {
-      if (!seen.has(m)) {
-        seen.add(m);
-        models.push(m);
-      }
-    }
-
+    const models = this.buildModelList(request.model);
     let lastError: unknown;
 
     for (const model of models) {
-      let modelExhausted = true; // assume exhausted until a non-quota error
       let modelUnavailable = false;
+      let triedAnyKey = false;
+      let allExhausted = false;
 
       for (let ki = 0; ki < this.clients.length; ki++) {
-        const client = this.clients[ki]!;
-        let keyExhausted = true;
+        if (this.now() < this.keyCooldownUntil[ki]!) continue; // key đang nghỉ cooldown
+        triedAnyKey = true;
 
-        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-          try {
-            const result = await client.models.generateContent({ ...request, model });
-            return result;
-          } catch (err) {
-            lastError = err;
-            if (isModelUnavailable(err)) {
-              // Model 404/deprecated → không cần thử key khác, chuyển ngay sang model tiếp
-              modelUnavailable = true;
-              console.warn(
-                `[L.H.T GEMINI] Model "${model}" không khả dụng (404) → chuyển sang model tiếp theo.`
-              );
-              break;
-            }
-            if (!isQuotaExhausted(err)) {
-              // Lỗi thực sự (mạng, schema sai...) → ném ngay, không rotate
-              throw err;
-            }
-            keyExhausted = true;
-            if (attempt < MAX_ATTEMPTS) {
-              await sleepWithJitter(BASE_BACKOFF_MS, attempt);
-            }
+        try {
+          return await this.clients[ki]!.models.generateContent({ ...request, model });
+        } catch (err) {
+          lastError = err;
+          if (isModelUnavailable(err)) {
+            // Model 404/deprecated → không cần thử key khác, chuyển ngay sang model tiếp
+            modelUnavailable = true;
+            console.warn(
+              `[L.H.T GEMINI] Model "${model}" không khả dụng (404) → chuyển sang model tiếp theo.`
+            );
+            break;
           }
-        }
-
-        if (modelUnavailable) break; // thoát vòng key, thử model tiếp
-
-        if (keyExhausted && ki < this.clients.length - 1) {
+          if (!isQuotaExhausted(err)) {
+            // Lỗi thực sự (mạng, schema sai...) → ném ngay, không rotate
+            throw err;
+          }
+          allExhausted = true;
+          this.coolDownKey(ki, err);
           console.warn(
-            `[L.H.T GEMINI] Key #${ki + 1} hết quota với model "${model}" → thử key #${ki + 2}.`
+            `[L.H.T GEMINI] Key #${ki + 1} hết quota với model "${model}" → thử key tiếp theo.`
           );
         }
       }
 
-      if (!modelUnavailable && modelExhausted) {
-        // Mọi key đều hết quota cho model này → thử model tiếp theo
+      if (modelUnavailable) continue; // thoát vòng key, thử model tiếp
+
+      if (allExhausted || !triedAnyKey) {
         const nextModel = models[models.indexOf(model) + 1];
         if (nextModel) {
           console.warn(
-            `[L.H.T GEMINI] Tất cả key đã hết quota với model "${model}" → chuyển sang "${nextModel}".`
+            `[L.H.T GEMINI] Không thể dùng model "${model}" → chuyển sang "${nextModel}".`
           );
         }
       }
     }
 
+    if (!lastError) {
+      lastError = new Error('Tất cả Gemini API keys đang trong cooldown (hết quota).');
+    }
     throw lastError;
   }
 
@@ -475,8 +578,11 @@ class GeminiService {
   async embed(text: string): Promise<number[]> {
     if (!this.isAvailable()) return [];
     try {
-      // Embed dùng key đầu tiên (primary); nếu fail thử key tiếp
+      await this.bucket.acquire();
+
+      // Embed dùng key đầu tiên còn sẵn sàng; nếu hết quota thử key tiếp
       for (let ki = 0; ki < this.clients.length; ki++) {
+        if (this.now() < this.keyCooldownUntil[ki]!) continue;
         const client = this.clients[ki]!;
         try {
           const response = await client.models.embedContent({
@@ -486,10 +592,9 @@ class GeminiService {
           const values = response.embeddings?.[0]?.values;
           return values ? Array.from(values) : [];
         } catch (err) {
-          if (!isQuotaExhausted(err) || ki === this.clients.length - 1) {
-            throw err;
-          }
-          console.warn(`[L.H.T GEMINI] Embed key #${ki + 1} hết quota → thử key #${ki + 2}.`);
+          if (!isQuotaExhausted(err)) throw err;
+          this.coolDownKey(ki, err);
+          console.warn(`[L.H.T GEMINI] Embed key #${ki + 1} hết quota → thử key tiếp theo.`);
         }
       }
       return [];
@@ -499,8 +604,8 @@ class GeminiService {
     }
   }
 
-  async summarizeNews(rawText: string, title: string): Promise<CognitiveNewsOutput> {
-    return this.generateJson<CognitiveNewsOutput>({
+  async summarizeNews(rawText: string, title: string): Promise<ArticleCognitiveOutput> {
+    return this.generateJson<ArticleCognitiveOutput>({
       systemInstruction: NEWS_COGNITIVE_SYSTEM_PROMPT,
       userContent: `Tiêu đề tin: ${title}\n\nNội dung bài viết:\n${rawText.slice(0, 6_000)}`,
       schema: NEWS_SCHEMA,

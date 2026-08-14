@@ -37,3 +37,6 @@ services:
         sync: false
       - key: PIPELINE_SECRET
         sync: false
+      # Số request AI tối đa mỗi phút (thấp hơn limit free tier để tránh 429)
+      - key: GEMINI_RPM
+        sync: false

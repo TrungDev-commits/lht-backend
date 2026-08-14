@@ -10,7 +10,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --expose-gc --max-old-space-size=384 dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/fallback.test.ts test/gemini-rotation.test.ts test/pipeline.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.16.0",

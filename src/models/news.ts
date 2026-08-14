@@ -10,6 +10,8 @@ export interface News {
   title_hash: string;
   icebreaker: string;
   source_name: string;
+  /** true = bản tạm (degraded) khi AI hết quota, chờ pipeline nâng cấp lại */
+  needs_ai_upgrade?: boolean;
   created_at: Date;
 }
 
@@ -31,6 +33,7 @@ export const newsSchema = new Schema(
     title_hash: { type: String, required: true, unique: true, index: true },
     icebreaker: { type: String, default: '', trim: true },
     source_name: { type: String, default: '', trim: true },
+    needs_ai_upgrade: { type: Boolean, default: false },
     created_at: { type: Date, default: Date.now },
   },
   {

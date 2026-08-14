@@ -44,6 +44,8 @@ export const env = {
   // Danh sách model free để rotate khi quota hết, cách nhau dấu phẩy
   // Thứ tự ưu tiên: primary -> mỗi model trong list này
   GEMINI_FREE_MODELS: process.env.GEMINI_FREE_MODELS ?? 'gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite,gemini-1.5-flash',
+  // Số request tối đa mỗi phút trên toàn app (token bucket) — thấp hơn limit free để không đụng 429
+  GEMINI_RPM: toNumber(process.env.GEMINI_RPM, 12),
   PIPELINE_LIMIT_PER_SOURCE: toNumber(process.env.PIPELINE_LIMIT_PER_SOURCE, 5),
   PIPELINE_AI_DELAY_MS: toNumber(process.env.PIPELINE_AI_DELAY_MS, 1000),
   NEWS_RSS_URL: process.env.NEWS_RSS_URL ?? '',
