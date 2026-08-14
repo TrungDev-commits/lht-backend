@@ -122,6 +122,36 @@ test('aiExhausted từ trước → bỏ qua AI, dùng fallback', async () => {
   assert.equal(aiCalls, 0);
 });
 
+test('nguồn tiếng Anh + AI hết quota → audio_script tiếng Việt thuần', async () => {
+  const enSource: RssSourceConfig = {
+    name: 'Dev.to Top',
+    url: 'https://dev.to/feed',
+    category: 'DevOps',
+    lang: 'en',
+  };
+  const enArticle: ScrapedArticle = {
+    title: 'How to Build a Minimal SIEM',
+    link: 'https://dev.to/1',
+    rawText: 'Most teams cannot afford Splunk. Elastic SIEM takes real time to tune.',
+    titleHash: 'hash-en-1',
+    publishedAt: new Date(),
+    sourceName: 'Dev.to Top',
+  };
+  const createdNews: unknown[] = [];
+  const createdKb: unknown[] = [];
+  const store = makeStore({ createdNews, createdKb });
+
+  const { outcome } = await processArticle(
+    makeInput({ ai: makeAi('quota'), store, source: enSource, article: enArticle })
+  );
+
+  assert.equal(outcome.status, 'fallback');
+  const audio = (createdNews[0] as { audio_script: string }).audio_script;
+  assert.ok(audio.startsWith('Trong tin hôm nay:'));
+  assert.ok(!audio.includes('Splunk'), 'audio không được chứa câu gốc tiếng Anh');
+  assert.ok(audio.includes('Dev.to Top'));
+});
+
 test('đã tồn tại bản tốt → duplicate', async () => {
   const store = makeStore({ existing: { needs_ai_upgrade: false } });
 

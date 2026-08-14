@@ -103,3 +103,26 @@ test('classifyCategory: phần cứng -> HARDWARE, còn lại -> SOFTWARE', () =
   assert.equal(classifyCategory('card đồ họa rời'), 'HARDWARE');
   assert.equal(classifyCategory('tutorial react hook'), 'SOFTWARE');
 });
+
+test('nguồn không phải tiếng Việt (en) → audio_script thuần tiếng Việt, không đổ câu gốc', () => {
+  const out = buildDegradedCognitive({
+    title: 'How to Build a Minimal SIEM',
+    rawText: 'Most teams cannot afford Splunk. Elastic SIEM takes real time to tune.',
+    sourceName: 'Dev.to Top',
+    lang: 'en',
+  });
+  assert.ok(out.audio_script.startsWith('Trong tin hôm nay:'));
+  assert.ok(!out.audio_script.includes('Splunk'), 'không được đổ câu tiếng Anh vào audio');
+  assert.ok(!out.audio_script.includes('Elastic'));
+  assert.ok(out.audio_script.includes('Dev.to Top'));
+  assert.ok(countWords(out.audio_script) <= 80);
+});
+
+test('nguồn tiếng Việt → vẫn trích câu dẫn từ rawText', () => {
+  const out = buildDegradedCognitive({
+    title: 'Chip AI mới của NVIDIA',
+    rawText: 'Đây là bài viết giới thiệu con chip mới nhất. Nó hứa hẹn hiệu năng vượt trội.',
+    lang: 'vi',
+  });
+  assert.ok(out.audio_script.includes('bài viết giới thiệu'));
+});

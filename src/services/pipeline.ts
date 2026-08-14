@@ -151,6 +151,7 @@ export async function processArticle(input: ProcessArticleInput): Promise<{ outc
       rawText: article.rawText,
       sourceName: source.name,
       category: source.category,
+      lang: source.lang,
     });
 
     await store.createNews({

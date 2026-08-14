@@ -23,6 +23,9 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # Phải là v1beta — systemInstruction (developer instruction) không hỗ trợ v1
+      - key: GEMINI_API_VERSION
+        sync: false
       # [ANTI-QUOTA] Nhiều key cách nhau dấu phẩy: KEY2,KEY3
       - key: GEMINI_API_KEYS
         sync: false

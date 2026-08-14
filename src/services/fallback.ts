@@ -11,6 +11,8 @@ export interface FallbackInput {
   rawText: string;
   sourceName?: string;
   category?: string;
+  /** Ngôn ngữ nguồn tin: 'vi' | 'en' ... — nguồn không phải tiếng Việt thì không trích câu gốc vào audio. */
+  lang?: string;
 }
 
 export interface FallbackCognitive extends CognitiveNewsOutput {
@@ -85,9 +87,14 @@ export function classifyCategory(text: string): 'HARDWARE' | 'SOFTWARE' {
   return HARDWARE_HINTS.some((hint) => lower.includes(hint)) ? 'HARDWARE' : 'SOFTWARE';
 }
 
-function buildAudioScript(keyword: string, rawText: string): string {
+function buildAudioScript(keyword: string, input: FallbackInput): string {
   const intro = `Trong tin hôm nay: ${keyword}.`;
-  const lead = extractLeadSentences(rawText, MAX_SCRIPT_WORDS - countWords(intro));
+  // Nguồn không phải tiếng Việt → audio thuần tiếng Việt, không đổ câu gốc vào (TTS đọc chuẩn)
+  if (input.lang && input.lang !== 'vi') {
+    const from = input.sourceName ? `Nguồn ${input.sourceName} vừa đăng tin — ` : '';
+    return `${intro} ${from}L.H.T sẽ tổng hợp nội dung chi tiết bằng tiếng Việt khi AI khả dụng.`;
+  }
+  const lead = extractLeadSentences(input.rawText, MAX_SCRIPT_WORDS - countWords(intro));
   if (!lead) return `${intro} Nội dung bài viết đang được cập nhật.`;
   return `${intro} ${lead}`;
 }
@@ -128,7 +135,7 @@ export function buildDegradedCognitive(input: FallbackInput): FallbackCognitive 
 
   return {
     keyword,
-    audio_script: buildAudioScript(keyword, input.rawText),
+    audio_script: buildAudioScript(keyword, input),
     web_dev_analogy: analogy,
     graph_data: buildGraph(keyword, input.sourceName, input.category ?? ''),
     icebreaker,

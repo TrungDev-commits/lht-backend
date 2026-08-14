@@ -26,7 +26,7 @@ export const RSS_SOURCES: RssSourceConfig[] = [
   },
   {
     name: 'VnEconomy Công Nghệ',
-    url: 'https://vneconomy.net/rss/cong-nghe.rss',
+    url: 'https://vneconomy.vn/rss/cong-nghe.rss',
     category: 'Market',
     lang: 'vi',
   },

@@ -38,7 +38,8 @@ export const env = {
   // Nhiều API key cách nhau dấu phẩy — rotate khi quota key trước hết
   GEMINI_API_KEYS: process.env.GEMINI_API_KEYS ?? '',
   GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
-  GEMINI_API_VERSION: process.env.GEMINI_API_VERSION ?? 'v1',
+  // systemInstruction (developer instruction) chỉ hỗ trợ ở api version v1beta
+  GEMINI_API_VERSION: process.env.GEMINI_API_VERSION ?? 'v1beta',
   GEMINI_EMBED_MODEL: process.env.GEMINI_EMBED_MODEL ?? 'gemini-embedding-2',
   GEMINI_FALLBACK_MODEL: process.env.GEMINI_FALLBACK_MODEL ?? '',
   // Danh sách model free để rotate khi quota hết, cách nhau dấu phẩy
